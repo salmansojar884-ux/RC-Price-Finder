@@ -2,9 +2,7 @@ const axios = require("axios");
 const cheerio = require("cheerio");
 
 async function searchRobu(query) {
-  const searchUrl =
-    `https://robu.in/?s=${encodeURIComponent(query)}` +
-    `&post_type=product`;
+  const searchUrl = `https://robu.in/?s=${encodeURIComponent(query)}&post_type=product`;
 
   try {
     console.log(`🔎 Robu search: ${query}`);
@@ -16,11 +14,10 @@ async function searchRobu(query) {
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
-      timeout: 15000,
+      timeout: 10000,
     });
 
     const $ = cheerio.load(response.data);
-
     const products = [];
 
     $("li.product, .product").each((index, element) => {
@@ -28,50 +25,39 @@ async function searchRobu(query) {
 
       const item = $(element);
 
-      const name = item
-        .find(
-          ".woocommerce-loop-product__title, .product-title, h2, h3"
-        )
+      const title = item
+        .find(".woocommerce-loop-product__title, .product-title, h2, h3")
         .first()
         .text()
         .trim();
 
-      const url = item
-        .find("a")
-        .first()
-        .attr("href");
+      const url = item.find("a").first().attr("href");
 
-      const priceText = item
-        .find(".price")
-        .first()
-        .text()
-        .trim();
+      const priceText = item.find(".price, .amount").text().trim();
 
-      if (!name || !url) return;
+      if (!title || !url) return;
 
       const priceMatch = priceText
         .replace(/,/g, "")
-        .match(/₹?\s*(\d+(?:\.\d+)?)/);
+        .match(/(\d+(?:\.\d+)?)/);
 
-      const price = priceMatch
-        ? Number(priceMatch[1])
-        : null;
+      const price = priceMatch ? Number(priceMatch[1]) : null;
+      const isOutOfStock = item.text().toLowerCase().includes("out of stock");
 
       products.push({
         store: "Robu",
-        name,
-        price,
+        title: title,
+        price: price,
         currency: "INR",
-        url,
+        url: url,
+        inStock: !isOutOfStock,
       });
     });
 
     console.log(`✅ Robu results: ${products.length}`);
-
     return products;
   } catch (error) {
     console.error("❌ Robu error:", error.message);
-
     return [];
   }
 }
