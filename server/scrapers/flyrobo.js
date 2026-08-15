@@ -30,7 +30,6 @@ async function searchFlyRobo(query) {
   try {
     console.log(`🔎 FlyRobo search: ${query}`);
 
-    // Use stealth browser to avoid 403 blocks on Render
     const html = await fetchPageHtml(searchUrl);
     if (!html) return [];
 

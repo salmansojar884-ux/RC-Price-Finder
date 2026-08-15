@@ -11,7 +11,6 @@ async function searchRobu(query) {
     let html = '';
 
     try {
-        // Use the stealth browser to bypass Cloudflare / 403 blocks
         html = await fetchPageHtml(`${BASE_URL}/?s=${encodeURIComponent(query)}&post_type=product`);
     } catch (e) {
         console.error(`❌ Robu fetch error: ${e.message}`);
