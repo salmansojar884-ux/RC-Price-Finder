@@ -118,8 +118,8 @@ app.get("/api/search", async (req, res) => {
   }
 });
 
-const PORT = 5000;
+const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
-  console.log(`🚀 RC Price Finder API running on http://localhost:${PORT}`);
+  console.log(`🚀 RC Price Finder API running on port ${PORT}`);
   console.log(`🏪 Connected stores: ${searchEngines.length} / ${stores.length}`);
 });
