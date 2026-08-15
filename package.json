@@ -10,7 +10,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "cloudscraper": "^4.6.0",
     "cors": "^2.8.6",
+    "puppeteer": "^25.7.0",
+    "puppeteer-extra": "^3.3.6",
+    "puppeteer-extra-plugin-stealth": "^2.11.2",
     "react": "^19.2.8",
     "react-dom": "^19.2.8"
   },

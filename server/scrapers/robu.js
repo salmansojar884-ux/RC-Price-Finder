@@ -1,65 +1,60 @@
-const axios = require("axios");
-const cheerio = require("cheerio");
+const cheerio = require('cheerio');
+const { fetchPageHtml } = require('../utils/stealthBrowser');
+const { matchesProduct } = require('../utils/matcher');
+
+const BASE_URL = 'https://robu.in';
 
 async function searchRobu(query) {
-  const searchUrl = `https://robu.in/?s=${encodeURIComponent(query)}&post_type=product`;
-
-  try {
     console.log(`🔎 Robu search: ${query}`);
+    const results = [];
+    const seen = new Set();
+    let html = '';
 
-    const response = await axios.get(searchUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      },
-      timeout: 10000,
-    });
+    try {
+        // Use the stealth browser to bypass Cloudflare / 403 blocks
+        html = await fetchPageHtml(`${BASE_URL}/?s=${encodeURIComponent(query)}&post_type=product`);
+    } catch (e) {
+        console.error(`❌ Robu fetch error: ${e.message}`);
+        return [];
+    }
 
-    const $ = cheerio.load(response.data);
-    const products = [];
+    try {
+        if (!html) return [];
+        const $ = cheerio.load(html);
 
-    $("li.product, .product").each((index, element) => {
-      if (products.length >= 20) return;
+        $('.product, .product-small, .product-item').each((_, element) => {
+            const container = $(element);
+            const title = container.find('.woocommerce-loop-product__title, .name, .product-title').text().trim();
 
-      const item = $(element);
+            if (!title || !matchesProduct(title, query)) return;
 
-      const title = item
-        .find(".woocommerce-loop-product__title, .product-title, h2, h3")
-        .first()
-        .text()
-        .trim();
+            let url = container.find('a.woocommerce-LoopProduct-link, a').attr('href');
+            if (!url || seen.has(url)) return;
+            seen.add(url);
 
-      const url = item.find("a").first().attr("href");
+            const priceText = container.find('.price').text();
+            const match = priceText.replace(/,/g, '').match(/₹?\s*(\d+(?:\.\d+)?)/);
+            const price = match ? Number(match[1]) : null;
 
-      const priceText = item.find(".price, .amount").text().trim();
+            const inStock = !container.hasClass('outofstock') && !container.text().toLowerCase().includes('out of stock');
 
-      if (!title || !url) return;
+            results.push({
+                store: 'Robu',
+                title: title,
+                name: title,
+                price: price,
+                currency: 'INR',
+                url: url,
+                inStock: inStock
+            });
+        });
 
-      const priceMatch = priceText
-        .replace(/,/g, "")
-        .match(/(\d+(?:\.\d+)?)/);
-
-      const price = priceMatch ? Number(priceMatch[1]) : null;
-      const isOutOfStock = item.text().toLowerCase().includes("out of stock");
-
-      products.push({
-        store: "Robu",
-        title: title,
-        price: price,
-        currency: "INR",
-        url: url,
-        inStock: !isOutOfStock,
-      });
-    });
-
-    console.log(`✅ Robu results: ${products.length}`);
-    return products;
-  } catch (error) {
-    console.error("❌ Robu error:", error.message);
-    return [];
-  }
+        console.log(`✅ Robu exact matches: ${results.length}`);
+        return results;
+    } catch (e) {
+        console.error(`❌ Robu parse error: ${e.message}`);
+        return [];
+    }
 }
 
 module.exports = searchRobu;

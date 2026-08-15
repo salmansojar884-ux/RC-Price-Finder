@@ -1,6 +1,8 @@
 const axios = require("axios");
 const cheerio = require("cheerio");
 
+const BASE_URL = "https://robocraze.com";
+
 function normalize(text) {
   return text
     .toLowerCase()
@@ -13,35 +15,28 @@ function matchesProduct(name, query) {
   const product = normalize(name);
   const search = normalize(query);
 
-  // Exact phrase match
-  if (product.includes(search)) {
-    return true;
-  }
-
-  // Require every search word
   const tokens = search.split(" ");
-
-  return tokens.every((token) => {
-    return product.includes(token);
-  });
+  return tokens.every((token) => product.includes(token));
 }
 
 function isBundleProduct(name, query) {
   const product = normalize(name);
   const search = normalize(query);
 
-  /*
-   * When searching for a single component,
-   * reject products that are clearly bundles.
-   */
+  const userWantsBundle =
+    search.includes("bundle") ||
+    search.includes("combo") ||
+    search.includes("kit") ||
+    search.includes("set") ||
+    search.includes("pack");
+
+  if (userWantsBundle) return false;
 
   const bundleWords = [
     "bundle",
     "combo",
-    "combo kit",
-    "kit",
-    "set",
-    "pack",
+    "starter kit",
+    "complete kit",
     "frame kit",
     "motor and",
     "motor with",
@@ -57,131 +52,91 @@ function isBundleProduct(name, query) {
     "charger with",
   ];
 
-  /*
-   * Only apply bundle filtering to component searches.
-   *
-   * If the user is intentionally searching for a
-   * bundle/kit/set, don't remove it.
-   */
-  const userWantsBundle =
-    search.includes("bundle") ||
-    search.includes("combo") ||
-    search.includes("kit") ||
-    search.includes("set") ||
-    search.includes("pack");
-
-  if (userWantsBundle) {
-    return false;
-  }
-
   return bundleWords.some((word) => product.includes(word));
 }
 
 async function searchRobocraze(query) {
-  const searchUrl =
-    `https://robocraze.com/search?q=${encodeURIComponent(query)}`;
+  console.log(`🔎 Robocraze search: ${query}`);
+
+  const searchUrl = `${BASE_URL}/search?q=${encodeURIComponent(query)}`;
 
   try {
-    console.log(`🔎 Robocraze search: ${query}`);
-
-    const response = await axios.get(searchUrl, {
+    const { data } = await axios.get(searchUrl, {
       headers: {
         "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
       },
       timeout: 15000,
     });
 
-    const $ = cheerio.load(response.data);
-
-    const products = [];
+    const $ = cheerio.load(data);
+    const results = [];
     const seen = new Set();
 
-    $('a[href*="/products/"]').each((index, element) => {
-      const link = $(element);
-      const href = link.attr("href");
+    $(
+      ".card, .product-card, .product-item, .grid__item, article.product-grid-item"
+    ).each((_, el) => {
+      const container = $(el);
 
-      if (!href) return;
-
-      const url = href.startsWith("http")
-        ? href
-        : `https://robocraze.com${href}`;
-
-      // Remove duplicate product URLs
-      if (seen.has(url)) return;
-
-      let name = link
-        .find(
-          "h2, h3, .card__heading, .product-title"
-        )
+      let name = container
+        .find("h2, h3, .card__heading, .product-title, .product-item__title")
         .first()
         .text()
         .trim();
 
-      // Some Shopify cards don't put the name in the heading
-      if (!name) {
-        name = link.text().trim();
-      }
-
-      // Ignore empty/invalid names
-      if (!name || name.length < 5) return;
-
-      // Ignore Shopify placeholder
+      if (!name || name.length < 3) return;
       if (normalize(name) === "notify me") return;
 
-      // STRICT PRODUCT MATCH
-      if (!matchesProduct(name, query)) {
-        return;
-      }
+      const linkTag = container.find('a[href*="/products/"]').first();
+      let link = linkTag.attr("href");
 
-      // REMOVE BUNDLES
+      if (!link) return;
+      if (!link.startsWith("http")) link = `${BASE_URL}${link}`;
+      link = link.split("?")[0].split("#")[0];
+
+      if (seen.has(link)) return;
+
+      if (!matchesProduct(name, query)) return;
       if (isBundleProduct(name, query)) {
-        console.log(`🚫 Bundle removed: ${name}`);
+        console.log(`🚫 Robocraze bundle removed: ${name}`);
         return;
       }
 
-      const container = link.closest(
-        ".card, .product-card, .product-item, .grid__item"
-      );
-
-      const priceText = container
-        .find(".price, .money, .price-item")
+      let priceText = container
+        .find(".price, .money, .price-item--sale, .price-item")
         .first()
         .text()
         .trim();
 
-      const match = priceText
+      const priceMatch = priceText
         .replace(/,/g, "")
         .match(/₹?\s*(\d+(?:\.\d+)?)/);
 
-      const price = match
-        ? Number(match[1])
-        : null;
+      const price = priceMatch ? Number(priceMatch[1]) : null;
+      const isOutOfStock =
+        container.text().toLowerCase().includes("sold out") ||
+        container.text().toLowerCase().includes("out of stock");
 
-      seen.add(url);
+      seen.add(link);
 
-      products.push({
+      results.push({
         store: "Robocraze",
-        name,
-        price,
+        title: name,
+        name: name,
+        price: price,
         currency: "INR",
-        url,
+        url: link,
+        inStock: !isOutOfStock,
       });
     });
 
-    console.log(
-      `✅ Robocraze exact matches: ${products.length}`
-    );
-
-    return products;
+    console.log(`✅ Robocraze exact matches: ${results.length}`);
+    return results;
   } catch (error) {
-    console.error(
-      `❌ Robocraze error: ${error.message}`
-    );
-
+    console.error(`❌ Robocraze error: ${error.message}`);
     return [];
   }
 }

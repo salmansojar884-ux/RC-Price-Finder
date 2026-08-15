@@ -15,12 +15,7 @@ function matchesProduct(name, query) {
   const product = normalize(name);
   const search = normalize(query);
 
-  if (product.includes(search)) {
-    return true;
-  }
-
   const tokens = search.split(" ");
-
   return tokens.every((token) => product.includes(token));
 }
 
@@ -34,9 +29,7 @@ function isBundleProduct(name, query) {
     search.includes("kit") ||
     search.includes("set");
 
-  if (userWantsBundle) {
-    return false;
-  }
+  if (userWantsBundle) return false;
 
   const bundleWords = [
     "bundle",
@@ -53,279 +46,102 @@ function isBundleProduct(name, query) {
     "propellers",
   ];
 
-  return bundleWords.some((word) =>
-    product.includes(word)
-  );
-}
-
-function extractPrice(text) {
-  if (!text) {
-    return null;
-  }
-
-  const clean = text.replace(/,/g, "");
-
-  const matches = [
-    /₹\s*(\d+(?:\.\d+)?)/i,
-    /Rs\.?\s*(\d+(?:\.\d+)?)/i,
-    /INR\s*(\d+(?:\.\d+)?)/i,
-  ];
-
-  for (const pattern of matches) {
-    const match = clean.match(pattern);
-
-    if (match) {
-      return Number(match[1]);
-    }
-  }
-
-  return null;
+  return bundleWords.some((word) => product.includes(word));
 }
 
 async function searchTanishRC(query) {
   console.log(`🔎 Tanish RC search: ${query}`);
 
-  const searchUrls = [
-    `${BASE_URL}/?s=${encodeURIComponent(query)}&post_type=product`,
-    `${BASE_URL}/shop/?s=${encodeURIComponent(query)}&post_type=product`,
-    `${BASE_URL}/?post_type=product&s=${encodeURIComponent(query)}`,
-  ];
-
-  const products = [];
+  const results = [];
   const seen = new Set();
 
-  for (let page = 0; page < searchUrls.length; page++) {
-    const searchUrl = searchUrls[page];
+  try {
+    const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(query)}&post_type=product`;
 
-    try {
-      console.log(`   🌐 Tanish URL: ${searchUrl}`);
+    const { data } = await axios.get(searchUrl, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        Referer: `${BASE_URL}/`,
+      },
+      timeout: 15000,
+    });
 
-      const response = await axios.get(searchUrl, {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-          "Accept-Language":
-            "en-US,en;q=0.9",
-        },
-        timeout: 20000,
-      });
+    const $ = cheerio.load(data);
 
-      const $ = cheerio.load(response.data);
+    $("li.product, .product.type-product").each((_, el) => {
+      const container = $(el);
 
-      /*
-       * Try WooCommerce product links.
-       */
-      $('a[href*="/product/"]').each((index, element) => {
-        const link = $(element);
+      let name = container
+        .find(".woocommerce-loop-product__title, .product-title, .product-name, h2, h3")
+        .first()
+        .text()
+        .trim();
 
-        let href = link.attr("href");
+      if (!name || name.length < 3) return;
 
-        if (!href) {
-          return;
-        }
-
-        if (!href.startsWith("http")) {
-          href = `${BASE_URL}${href}`;
-        }
-
-        const url = href.split("?")[0];
-
-        if (seen.has(url)) {
-          return;
-        }
-
-        let name = link
-          .find(
-            "h1, h2, h3, h4, .woocommerce-loop-product__title, .product-title, .product-name"
-          )
-          .first()
-          .text()
-          .trim();
-
-        /*
-         * Sometimes title is in the parent product card.
-         */
-        if (!name) {
-          const container = link.closest(
-            "li.product, .product, .type-product, .product-card, .product-item"
-          );
-
-          name = container
-            .find(
-              ".woocommerce-loop-product__title, .product-title, .product-name, h2, h3, h4"
-            )
-            .first()
-            .text()
-            .trim();
-        }
-
-        /*
-         * Last fallback.
-         */
-        if (!name) {
-          name = link.text().trim();
-        }
-
-        if (!name || name.length < 5) {
-          return;
-        }
-
-        const normalizedName = normalize(name);
-
-        if (
-          normalizedName === "add to cart" ||
-          normalizedName === "read more" ||
-          normalizedName === "quick view" ||
-          normalizedName === "notify me"
-        ) {
-          return;
-        }
-
-        /*
-         * Strict matching.
-         */
-        if (!matchesProduct(name, query)) {
-          return;
-        }
-
-        /*
-         * Remove bundles for component searches.
-         */
-        if (isBundleProduct(name, query)) {
-          console.log(
-            `🚫 Tanish RC bundle removed: ${name}`
-          );
-          return;
-        }
-
-        const container = link.closest(
-          "li.product, .product, .type-product, .product-card, .product-item"
-        );
-
-        let priceText = "";
-
-        if (container.length) {
-          priceText = container
-            .find(
-              ".price, .woocommerce-Price-amount, .amount, .product-price"
-            )
-            .first()
-            .text()
-            .trim();
-        }
-
-        if (!priceText) {
-          priceText = link.text().trim();
-        }
-
-        const price = extractPrice(priceText);
-
-        seen.add(url);
-
-        products.push({
-          store: "Tanish RC",
-          name,
-          price,
-          currency: "INR",
-          url,
-        });
-      });
-
-      /*
-       * Also look for product cards that may not use
-       * the standard WooCommerce selectors.
-       */
-      $(
-        ".product, .product-card, .product-item, li.type-product"
-      ).each((index, element) => {
-        const card = $(element);
-
-        let name = card
-          .find(
-            ".woocommerce-loop-product__title, .product-title, .product-name, h2, h3, h4"
-          )
-          .first()
-          .text()
-          .trim();
-
-        if (!name || name.length < 5) {
-          return;
-        }
-
-        if (!matchesProduct(name, query)) {
-          return;
-        }
-
-        if (isBundleProduct(name, query)) {
-          console.log(
-            `🚫 Tanish RC bundle removed: ${name}`
-          );
-          return;
-        }
-
-        const linkElement = card
-          .find("a[href*='/product/']")
-          .first();
-
-        let href = linkElement.attr("href");
-
-        if (!href) {
-          return;
-        }
-
-        if (!href.startsWith("http")) {
-          href = `${BASE_URL}${href}`;
-        }
-
-        const url = href.split("?")[0];
-
-        if (seen.has(url)) {
-          return;
-        }
-
-        const priceText = card
-          .find(
-            ".price, .woocommerce-Price-amount, .amount, .product-price"
-          )
-          .first()
-          .text()
-          .trim();
-
-        const price = extractPrice(priceText);
-
-        seen.add(url);
-
-        products.push({
-          store: "Tanish RC",
-          name,
-          price,
-          currency: "INR",
-          url,
-        });
-      });
-
-      /*
-       * If we found products, no need to keep trying
-       * alternative search URLs.
-       */
-      if (products.length > 0) {
-        break;
+      const normalizedName = normalize(name);
+      if (
+        normalizedName === "add to cart" ||
+        normalizedName === "read more" ||
+        normalizedName === "quick view" ||
+        normalizedName === "notify me"
+      ) {
+        return;
       }
 
-    } catch (error) {
-      console.error(
-        `❌ Tanish RC page ${page + 1} error: ${error.message}`
-      );
-    }
+      const linkTag = container.find("a").first();
+      let link = linkTag.attr("href");
+
+      if (!link) return;
+      if (!link.startsWith("http")) link = `${BASE_URL}${link}`;
+      link = link.split("?")[0].split("#")[0];
+
+      if (seen.has(link)) return;
+
+      if (!matchesProduct(name, query)) return;
+      if (isBundleProduct(name, query)) {
+        console.log(`🚫 Tanish RC bundle removed: ${name}`);
+        return;
+      }
+
+      let priceText = container
+        .find(".price ins .amount, .price .amount, .woocommerce-Price-amount")
+        .last()
+        .text()
+        .trim();
+
+      const priceMatch = priceText
+        .replace(/,/g, "")
+        .match(/₹?\s*(\d+(?:\.\d+)?)/);
+
+      const price = priceMatch ? Number(priceMatch[1]) : null;
+      const isOutOfStock =
+        container.text().toLowerCase().includes("out of stock") ||
+        container.hasClass("outofstock");
+
+      seen.add(link);
+
+      results.push({
+        store: "Tanish RC",
+        title: name,
+        name: name,
+        price: price,
+        currency: "INR",
+        url: link,
+        inStock: !isOutOfStock,
+      });
+    });
+
+    console.log(`✅ Tanish RC exact matches: ${results.length}`);
+    return results;
+  } catch (error) {
+    console.error(`❌ Tanish RC error: ${error.message}`);
+    return [];
   }
-
-  console.log(
-    `✅ Tanish RC exact matches: ${products.length}`
-  );
-
-  return products;
 }
 
 module.exports = searchTanishRC;

@@ -90,7 +90,8 @@ app.get("/api/search", async (req, res) => {
     const seen = new Set();
 
     for (const item of results) {
-      const key = `${item.store}|${item.url}`;
+      if (!item || !item.url) continue;
+      const key = `${item.store || "Store"}|${item.url}`;
       if (!seen.has(key)) {
         seen.add(key);
         uniqueResults.push(item);
@@ -98,8 +99,8 @@ app.get("/api/search", async (req, res) => {
     }
 
     uniqueResults.sort((a, b) => {
-      if (a.price === null) return 1;
-      if (b.price === null) return -1;
+      if (a.price === null || a.price === undefined) return 1;
+      if (b.price === null || b.price === undefined) return -1;
       return a.price - b.price;
     });
 

@@ -1,32 +1,12 @@
-const axios = require("axios");
 const cheerio = require("cheerio");
+const { fetchPageHtml } = require("../utils/stealthBrowser");
+const { matchesProduct } = require("../utils/matcher");
 
 const BASE_URL = "https://www.flyrobo.in";
 
-function normalize(text) {
-  return text
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function matchesProduct(name, query) {
-  const product = normalize(name);
-  const search = normalize(query);
-
-  if (product.includes(search)) {
-    return true;
-  }
-
-  const tokens = search.split(" ");
-
-  return tokens.every((token) => product.includes(token));
-}
-
 function isBundleProduct(name, query) {
-  const product = normalize(name);
-  const search = normalize(query);
+  const product = name.toLowerCase();
+  const search = query.toLowerCase();
 
   const userWantsBundle =
     search.includes("bundle") ||
@@ -34,109 +14,61 @@ function isBundleProduct(name, query) {
     search.includes("kit") ||
     search.includes("set");
 
-  if (userWantsBundle) {
-    return false;
-  }
+  if (userWantsBundle) return false;
 
   const bundleWords = [
-    "bundle",
-    "combo",
-    "combo kit",
-    "starter kit",
-    "complete kit",
-    "frame kit",
-    "motor and",
-    "motor with",
-    "esc and",
-    "esc with",
-    "propeller",
-    "propellers"
+    "bundle", "combo", "combo kit", "starter kit", "complete kit",
+    "frame kit", "motor and", "motor with", "esc and", "esc with", "propeller", "propellers"
   ];
 
-  return bundleWords.some((word) =>
-    product.includes(word)
-  );
+  return bundleWords.some((word) => product.includes(word));
 }
 
 async function searchFlyRobo(query) {
-  const searchUrl =
-    `${BASE_URL}/catalogsearch/result/?q=${encodeURIComponent(query)}`;
+  const searchUrl = `${BASE_URL}/catalogsearch/result/?q=${encodeURIComponent(query)}`;
 
   try {
     console.log(`🔎 FlyRobo search: ${query}`);
-    console.log(`   🌐 FlyRobo URL: ${searchUrl}`);
 
-    const response = await axios.get(searchUrl, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "en-US,en;q=0.9"
-      },
-      timeout: 20000
-    });
+    // Use stealth browser to avoid 403 blocks on Render
+    const html = await fetchPageHtml(searchUrl);
+    if (!html) return [];
 
-    const $ = cheerio.load(response.data);
-
+    const $ = cheerio.load(html);
     const products = [];
     const seen = new Set();
 
-    $('a[href]').each((index, element) => {
-      const link = $(element);
-      const href = link.attr("href");
+    $(".product-item, .product-item-info, .item.product").each((_, element) => {
+      const container = $(element);
 
-      if (!href) return;
+      const linkTag = container.find("a.product-item-link, a.product-item-photo, a").first();
+      let url = linkTag.attr("href");
 
-      let name = link
-        .find(
-          "h2, h3, .product-item-link, .product-name, .product-title"
-        )
+      if (!url) return;
+      if (url.startsWith("/")) url = `${BASE_URL}${url}`;
+      if (!url.startsWith(BASE_URL)) return;
+      url = url.split("#")[0];
+
+      if (seen.has(url)) return;
+
+      let name = container
+        .find(".product-item-link, .product-name, .product-title, h2, h3")
         .first()
         .text()
         .trim();
 
-      if (!name) {
-        name = link.text().trim();
-      }
+      if (!name) name = linkTag.text().trim();
+      if (!name || name.length < 3) return;
 
-      if (!name || name.length < 5) {
-        return;
-      }
-
-      if (!matchesProduct(name, query)) {
-        return;
-      }
+      if (!matchesProduct(name, query)) return;
 
       if (isBundleProduct(name, query)) {
-        console.log(
-          `🚫 FlyRobo bundle removed: ${name}`
-        );
+        console.log(`🚫 FlyRobo bundle removed: ${name}`);
         return;
       }
-
-      let url = href;
-
-      if (url.startsWith("/")) {
-        url = `${BASE_URL}${url}`;
-      }
-
-      if (!url.startsWith(BASE_URL)) {
-        return;
-      }
-
-      if (seen.has(url)) {
-        return;
-      }
-
-      const container = link.closest(
-        ".product-item, .product, .item, .product-item-info"
-      );
 
       const priceText = container
-        .find(
-          ".price, .price-box, .price-wrapper, .special-price, .regular-price"
-        )
+        .find(".price, .price-box, .price-wrapper, .special-price, .regular-price")
         .first()
         .text()
         .trim();
@@ -145,32 +77,27 @@ async function searchFlyRobo(query) {
         .replace(/,/g, "")
         .match(/₹?\s*(\d+(?:\.\d+)?)/);
 
-      const price = match
-        ? Number(match[1])
-        : null;
+      const price = match ? Number(match[1]) : null;
+      const isOutOfStock = container.text().toLowerCase().includes("out of stock") || 
+                           container.text().toLowerCase().includes("unavailable");
 
       seen.add(url);
 
       products.push({
         store: "FlyRobo",
-        name,
-        price,
+        title: name,
+        name: name,
+        price: price,
         currency: "INR",
-        url
+        url: url,
+        inStock: !isOutOfStock,
       });
     });
 
-    console.log(
-      `✅ FlyRobo exact matches: ${products.length}`
-    );
-
+    console.log(`✅ FlyRobo exact matches: ${products.length}`);
     return products;
-
   } catch (error) {
-    console.error(
-      `❌ FlyRobo error: ${error.message}`
-    );
-
+    console.error(`❌ FlyRobo error: ${error.message}`);
     return [];
   }
 }

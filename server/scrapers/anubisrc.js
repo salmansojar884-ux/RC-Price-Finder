@@ -3,10 +3,11 @@ const cheerio = require("cheerio");
 
 const BASE_URL = "https://anubisrc.com";
 
+// Preserve dots so numbers like "2207.5" don't get split into separate tokens
 function normalize(text) {
   return text
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/[^a-z0-9.]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
@@ -14,387 +15,109 @@ function normalize(text) {
 function matchesProduct(name, query) {
   const product = normalize(name);
   const search = normalize(query);
-
   const tokens = search.split(" ");
-
-  return tokens.every((token) => {
-    return product.includes(token);
-  });
+  return tokens.every((token) => product.includes(token));
 }
 
 function isBundleProduct(name, query) {
   const product = normalize(name);
   const search = normalize(query);
 
-  const wantsBundle =
+  const userWantsBundle =
     search.includes("bundle") ||
     search.includes("combo") ||
     search.includes("kit") ||
     search.includes("set");
 
-  if (wantsBundle) {
-    return false;
-  }
+  if (userWantsBundle) return false;
 
   const bundleWords = [
     "bundle",
     "combo",
     "starter kit",
     "complete kit",
-    "frame kit",
-    "motor and",
-    "motor with",
-    "esc and",
-    "esc with",
-    "propeller",
-    "propellers",
+    "power pack",
   ];
 
-  return bundleWords.some((word) => {
-    return product.includes(word);
-  });
+  return bundleWords.some((word) => product.includes(word));
 }
 
 async function searchAnubisRC(query) {
   console.log(`🔎 Anubis RC search: ${query}`);
-
   const results = [];
   const seen = new Set();
 
   try {
-    // ============================================
-    // USE WORDPRESS SEARCH
-    // ============================================
-
-    const searchUrl =
-      `${BASE_URL}/?s=${encodeURIComponent(query)}&post_type=product`;
-
-    console.log(
-      `   🌐 Anubis URL: ${searchUrl}`
-    );
-
-    const response = await axios.get(searchUrl, {
+    const searchUrl = `${BASE_URL}/?s=${encodeURIComponent(query)}&post_type=product`;
+    const { data } = await axios.get(searchUrl, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-
         Accept:
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-
-        "Accept-Language":
-          "en-US,en;q=0.9",
-
-        Referer:
-          `${BASE_URL}/`,
-
-        Connection:
-          "keep-alive",
+        "Accept-Language": "en-US,en;q=0.9",
+        Referer: `${BASE_URL}/`,
       },
-
-      timeout: 30000,
-
-      maxRedirects: 10,
+      timeout: 15000,
     });
 
-    const $ = cheerio.load(response.data);
+    const $ = cheerio.load(data);
 
-    // ============================================
-    // FIND PRODUCT LINKS
-    // ============================================
+    $("li.product, .product.type-product").each((_, el) => {
+      const container = $(el);
 
-    $('a[href*="/product/"]').each(
-      (index, element) => {
+      let name = container
+        .find(".woocommerce-loop-product__title, .product-title, h2, h3")
+        .first()
+        .text()
+        .trim();
 
-        const link = $(element);
+      if (!name || name.length < 3) return;
 
-        let url = link.attr("href");
+      const linkTag = container.find('a[href*="/product/"]').first();
+      let link = linkTag.attr("href");
 
-        if (!url) {
-          return;
-        }
+      if (!link) return;
+      if (!link.startsWith("http")) link = `${BASE_URL}${link}`;
+      link = link.split("?")[0].split("#")[0];
 
-        if (!url.startsWith("http")) {
-          url = `${BASE_URL}${url}`;
-        }
+      if (seen.has(link)) return;
 
-        // Remove URL fragments
-        url = url.split("#")[0];
+      if (!matchesProduct(name, query)) return;
+      if (isBundleProduct(name, query)) return;
 
-        if (seen.has(url)) {
-          return;
-        }
-
-        // ========================================
-        // GET PRODUCT NAME
-        // ========================================
-
-        let name = link
-          .find(
-            "h2, h3, h4, .woocommerce-loop-product__title"
-          )
-          .first()
-          .text()
-          .trim();
-
-        if (!name) {
-          name = link.text().trim();
-        }
-
-        if (!name || name.length < 3) {
-          return;
-        }
-
-        // ========================================
-        // IGNORE NON-PRODUCT LINKS
-        // ========================================
-
-        const normalizedName = normalize(name);
-
-        if (
-          normalizedName === "read more" ||
-          normalizedName === "quick view" ||
-          normalizedName === "add to cart"
-        ) {
-          return;
-        }
-
-        // ========================================
-        // STRICT MATCH
-        // ========================================
-
-        if (!matchesProduct(name, query)) {
-          return;
-        }
-
-        // ========================================
-        // REMOVE BUNDLES
-        // ========================================
-
-        if (isBundleProduct(name, query)) {
-          console.log(
-            `🚫 Anubis bundle removed: ${name}`
-          );
-
-          return;
-        }
-
-        // ========================================
-        // FIND PRICE
-        // ========================================
-
-        const container = link.closest(
-          "li, article, .product, .type-product"
-        );
-
-        let priceText = container
-          .find(
-            ".price, .woocommerce-Price-amount, .amount"
-          )
-          .first()
-          .text()
-          .trim();
-
-        if (!priceText) {
-          priceText = link
-            .parent()
-            .find(
-              ".price, .woocommerce-Price-amount, .amount"
-            )
-            .first()
-            .text()
-            .trim();
-        }
-
-        const priceMatch = priceText
-          .replace(/,/g, "")
-          .match(
-            /₹?\s*(\d+(?:\.\d+)?)/ 
-          );
-
-        const price = priceMatch
-          ? Number(priceMatch[1])
-          : null;
-
-        seen.add(url);
-
-        results.push({
-          store: "Anubis RC",
-          name,
-          price,
-          currency: "INR",
-          url,
-        });
-      }
-    );
-
-    // ============================================
-    // IF SEARCH RESULTS DIDN'T WORK,
-    // TRY WORDPRESS SEARCH WITHOUT post_type
-    // ============================================
-
-    if (results.length === 0) {
-
-      console.log(
-        "   🔄 Trying Anubis secondary search..."
-      );
-
-      const fallbackUrl =
-        `${BASE_URL}/?s=${encodeURIComponent(query)}`;
-
-      const fallbackResponse =
-        await axios.get(fallbackUrl, {
-          headers: {
-            "User-Agent":
-              "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/131 Safari/537.36",
-
-            Accept:
-              "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-
-            "Accept-Language":
-              "en-US,en;q=0.9",
-          },
-
-          timeout: 30000,
-
-          maxRedirects: 10,
-        });
-
-      const $$ = cheerio.load(
-        fallbackResponse.data
-      );
-
-      $$('a[href*="/product/"]').each(
-        (index, element) => {
-
-          const link = $$(element);
-
-          let url = link.attr("href");
-
-          if (!url) {
-            return;
-          }
-
-          if (!url.startsWith("http")) {
-            url = `${BASE_URL}${url}`;
-          }
-
-          url = url.split("#")[0];
-
-          if (seen.has(url)) {
-            return;
-          }
-
-          let name = link
-            .find(
-              "h2, h3, h4, .woocommerce-loop-product__title"
-            )
-            .first()
-            .text()
-            .trim();
-
-          if (!name) {
-            name = link.text().trim();
-          }
-
-          if (!name || name.length < 3) {
-            return;
-          }
-
-          if (!matchesProduct(name, query)) {
-            return;
-          }
-
-          if (isBundleProduct(name, query)) {
-            console.log(
-              `🚫 Anubis bundle removed: ${name}`
-            );
-
-            return;
-          }
-
-          const container = link.closest(
-            "li, article, .product, .type-product"
-          );
-
-          const priceText = container
-            .find(
-              ".price, .woocommerce-Price-amount, .amount"
-            )
-            .first()
-            .text()
-            .trim();
-
-          const priceMatch = priceText
-            .replace(/,/g, "")
-            .match(
-              /₹?\s*(\d+(?:\.\d+)?)/ 
-            );
-
-          const price = priceMatch
-            ? Number(priceMatch[1])
-            : null;
-
-          seen.add(url);
-
-          results.push({
-            store: "Anubis RC",
-            name,
-            price,
-            currency: "INR",
-            url,
-          });
-        }
-      );
-    }
-
-    // ============================================
-    // REMOVE DUPLICATES
-    // ============================================
-
-    const uniqueResults = [];
-
-    const resultUrls = new Set();
-
-    for (const product of results) {
-
-      if (resultUrls.has(product.url)) {
-        continue;
+      // Extract price accurately by checking sale price first, then regular price
+      let priceText = container.find(".price ins .amount").text().trim();
+      if (!priceText) {
+        priceText = container.find(".price .amount, .woocommerce-Price-amount").first().text().trim();
       }
 
-      resultUrls.add(product.url);
+      const priceMatch = priceText
+        .replace(/,/g, "")
+        .match(/(\d+(?:\.\d+)?)/);
 
-      uniqueResults.push(product);
-    }
+      const price = priceMatch ? Number(priceMatch[1]) : null;
+      const isOutOfStock =
+        container.text().toLowerCase().includes("out of stock") ||
+        container.hasClass("outofstock");
 
-    // ============================================
-    // SORT CHEAPEST FIRST
-    // ============================================
+      seen.add(link);
 
-    uniqueResults.sort((a, b) => {
-
-      if (a.price === null) {
-        return 1;
-      }
-
-      if (b.price === null) {
-        return -1;
-      }
-
-      return a.price - b.price;
+      results.push({
+        store: "Anubis RC",
+        title: name,
+        name: name,
+        price: price,
+        currency: "INR",
+        url: link,
+        inStock: !isOutOfStock,
+      });
     });
 
-    console.log(
-      `✅ Anubis RC exact matches: ${uniqueResults.length}`
-    );
-
-    return uniqueResults;
-
+    console.log(`✅ Anubis RC exact matches: ${results.length}`);
+    return results;
   } catch (error) {
-
-    console.error(
-      `❌ Anubis RC error: ${error.message}`
-    );
-
+    console.error(`❌ Anubis RC error: ${error.message}`);
     return [];
   }
 }
