@@ -1,5 +1,5 @@
+const axios = require("axios");
 const cheerio = require("cheerio");
-const { fetchPageHtml } = require("../utils/stealthBrowser");
 const { matchesProduct } = require("../utils/matcher");
 
 const BASE_URL = "https://www.flyrobo.in";
@@ -30,10 +30,17 @@ async function searchFlyRobo(query) {
   try {
     console.log(`🔎 FlyRobo search: ${query}`);
 
-    const html = await fetchPageHtml(searchUrl);
-    if (!html) return [];
+    const response = await axios.get(searchUrl, {
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9",
+        "Referer": "https://www.google.com/"
+      },
+      timeout: 10000,
+    });
 
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(response.data);
     const products = [];
     const seen = new Set();
 
