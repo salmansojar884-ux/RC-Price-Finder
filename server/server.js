@@ -1,21 +1,21 @@
-const express = require("express");
-const cors = require("cors");
+import express from "express";
+import cors from "cors";
 
-// Import scrapers
-const searchRobu = require("./scrapers/robu");
-const searchRobocraze = require("./scrapers/robocraze");
-const searchSilverline = require("./scrapers/silverline");
-const searchDRKStore = require("./scrapers/drkstore");
-const searchAnubisRC = require("./scrapers/anubisrc");
-const searchVortexRC = require("./scrapers/vortexrc");
-const searchTanishRC = require("./scrapers/tanishrc");
-const searchFlyRobo = require("./scrapers/flyrobo");
-const searchHiTechXYZ = require("./scrapers/hitechxyz");
-const searchIndianRoboStore = require("./scrapers/indianrobostore");
-const searchFPVStore = require("./scrapers/fpvstore");
-const searchRCMumbai = require("./scrapers/rcmumbai");
-const searchFPVGuru = require("./scrapers/fpvguru");
-const searchQuadKart = require("./scrapers/quadkart");
+// Import scrapers using ESM syntax
+import searchRobu from "./scrapers/robu.js";
+import searchRobocraze from "./scrapers/robocraze.js";
+import searchSilverline from "./scrapers/silverline.js";
+import searchDRKStore from "./scrapers/drkstore.js";
+import searchAnubisRC from "./scrapers/anubisrc.js";
+import searchVortexRC from "./scrapers/vortexrc.js";
+import searchTanishRC from "./scrapers/tanishrc.js";
+import searchFlyRobo from "./scrapers/flyrobo.js";
+import searchHiTechXYZ from "./scrapers/hitechxyz.js";
+import searchIndianRoboStore from "./scrapers/indianrobostore.js";
+import searchFPVStore from "./scrapers/fpvstore.js";
+import searchRCMumbai from "./scrapers/rcmumbai.js";
+import searchFPVGuru from "./scrapers/fpvguru.js";
+import searchQuadKart from "./scrapers/quadkart.js";
 
 const app = express();
 
