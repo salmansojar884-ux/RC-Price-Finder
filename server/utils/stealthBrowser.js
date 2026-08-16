@@ -1,23 +1,27 @@
-const puppeteer = require("puppeteer-extra");
-const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+const axios = require("axios");
 
-puppeteer.use(StealthPlugin());
-
-async function launchStealthBrowser() {
-  return await puppeteer.launch({
-    headless: "new",
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-accelerated-2d-canvas",
-      "--no-first-run",
-      "--no-zygote",
-      "--single-process",
-      "--disable-gpu"
-    ],
-    timeout: 30000
-  });
+async function fetchPageHtml(url) {
+  try {
+    const response = await axios.get(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept":
+          "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
+      },
+      timeout: 15000
+    });
+    return response.data;
+  } catch (error) {
+    console.error(`Fetch error for ${url}:`, error.message);
+    throw error;
+  }
 }
 
-module.exports = { launchStealthBrowser };
+// Fallback dummy browser launcher if referenced elsewhere
+async function launchStealthBrowser() {
+  throw new Error("Puppeteer is disabled to prevent Render resource exhaustion. Use Axios/Cheerio instead.");
+}
+
+module.exports = { fetchPageHtml, launchStealthBrowser };
